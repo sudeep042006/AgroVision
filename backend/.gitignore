@@ -136,4 +136,4 @@ serviceAccountKey.json
 *.bak
 *.orig
 
-backend/oc.exe
+oc.exe
