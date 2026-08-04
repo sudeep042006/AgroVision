@@ -1,0 +1,417 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+    View,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    KeyboardAvoidingView,
+    Platform,
+    ActivityIndicator,
+    StatusBar,
+    Keyboard,
+    Alert
+} from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { FlashList } from '@shopify/flash-list';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+    ChevronLeft,
+    MoreVertical,
+    Send,
+    Paperclip,
+    Mic,
+    CheckCheck,
+    Lock,
+    Trash2,
+    X,
+    CheckCircle2
+} from 'lucide-react-native';
+import { getChatMessages, deleteMessages } from '../../../../services/chatApi';
+import socketService from '../../../../services/socket';
+
+function AvatarPlaceholder({ name = "Unknown", size = 40 }) {
+    const initials = name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
+    const colors = ['#065f46', '#047857', '#059669', '#10b981'];
+    const color = colors[name.charCodeAt(0) % colors.length];
+    return (
+        <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }} className="justify-center items-center shadow-sm">
+            <Text className="text-white font-bold" style={{ fontSize: size * 0.35 }}>{initials}</Text>
+        </View>
+    );
+}
+
+function ChatHeader({ chatTitle, otherUserId, navigation, isSelectionMode, selectedCount, onCancelSelection, onDeleteSelected }) {
+    if (isSelectionMode) {
+        return (
+            <View className="flex-row items-center px-4 py-3 bg-[#123524] border-b border-white/5">
+                <TouchableOpacity onPress={onCancelSelection} className="mr-4 p-1.5 rounded-full bg-white/10">
+                    <X size={22} color="#fff" />
+                </TouchableOpacity>
+                <Text className="text-white font-bold text-lg flex-1">{selectedCount} selected</Text>
+                <TouchableOpacity onPress={onDeleteSelected} className="p-2 rounded-full bg-red-500/20">
+                    <Trash2 size={22} color="#f87171" />
+                </TouchableOpacity>
+            </View>
+        );
+    }
+
+    return (
+        <View className="flex-row items-center px-4 py-3 bg-[#123524] border-b border-white/5">
+            <TouchableOpacity onPress={() => navigation.goBack()} className="mr-2 p-1.5 rounded-full bg-white/10">
+                <ChevronLeft size={22} color="#fff" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+                className="flex-row items-center flex-1"
+                onPress={() => navigation.navigate('OfftakerProfileWindow', { userId: otherUserId })}
+            >
+                <AvatarPlaceholder name={chatTitle} size={40} />
+                <View className="ml-3">
+                    <Text className="text-white font-bold text-base tracking-tight">
+                        {chatTitle}
+                    </Text>
+                    <View className="flex-row items-center">
+                        <View className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5" />
+                        <Text className="text-emerald-300/80 text-[10px] font-bold uppercase tracking-widest">Active Now</Text>
+                    </View>
+                </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity className="p-2 rounded-full bg-white/5">
+                <MoreVertical size={20} color="#fff" />
+            </TouchableOpacity>
+        </View>
+    );
+}
+
+function MessageBubble({ message, isMine, onLongPress, onPress, isSelected, isSelectionMode }) {
+    const messageTime = new Date(message.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    return (
+        <TouchableOpacity
+            onLongPress={() => onLongPress(message._id || message.tempId)}
+            onPress={() => isSelectionMode ? onPress(message._id || message.tempId) : null}
+            activeOpacity={0.7}
+            className={`flex-row mb-3 px-4 ${isMine ? 'justify-end' : 'justify-start'} ${isSelected ? 'bg-emerald-500/10' : ''}`}
+        >
+            <View className="flex-row items-end max-w-[85%]">
+                {isSelectionMode && (
+                    <View className="mr-2 mb-2">
+                        {isSelected ? (
+                            <CheckCircle2 size={18} color="#10b981" fill="#10b981" />
+                        ) : (
+                            <View className="w-[18px] h-[18px] rounded-full border border-gray-300" />
+                        )}
+                    </View>
+                )}
+
+                <View className={`${isMine ? 'bg-[#123524] rounded-tr-sm' : 'bg-white rounded-tl-sm border border-gray-100'} rounded-2xl px-4 py-2.5 shadow-sm`}>
+                    <Text className={`${isMine ? 'text-white font-medium' : 'text-gray-800'} text-sm leading-6`}>
+                        {message.message}
+                    </Text>
+                    <View className="flex-row justify-end items-center mt-1 gap-x-1 opacity-70">
+                        <Text className={`${isMine ? 'text-emerald-200' : 'text-gray-400'} text-[9px] font-bold uppercase`}>
+                            {messageTime}
+                        </Text>
+                        {isMine && <CheckCheck size={12} color="#A7F3D0" />}
+                    </View>
+                </View>
+            </View>
+        </TouchableOpacity>
+    );
+}
+
+export default function MessageWindowScreen({ navigation, route }) {
+    const { chatId, chatTitle, otherUserId } = route.params;
+    const [messages, setMessages] = useState([]);
+    const [inputText, setInputText] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [currentUserId, setCurrentUserId] = useState(null);
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
+    const [selectedMessages, setSelectedMessages] = useState(new Set());
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const flatListRef = useRef(null);
+
+    useEffect(() => {
+        socketService.initiateSocketConnection();
+        setupChat();
+
+        const showSub = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+            (e) => {
+                setKeyboardHeight(e.endCoordinates.height);
+                setTimeout(scrollToBottom, 50);
+            }
+        );
+        const hideSub = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+            () => setKeyboardHeight(0)
+        );
+
+        return () => {
+            socketService.leaveChatRoom(chatId);
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, [chatId]);
+
+    const setupChat = async () => {
+        try {
+            setLoading(true);
+            const uid = await AsyncStorage.getItem('userId');
+            setCurrentUserId(uid);
+
+            const res = await getChatMessages(chatId);
+            if (res.success) {
+                setMessages(res.messages);
+            }
+
+            socketService.joinChatRoom(chatId);
+
+            socketService.subscribeToMessages((err, msg) => {
+                if (err) return;
+                setMessages(prev => {
+                    const index = prev.findIndex(m =>
+                        (m._id && m._id === msg._id) ||
+                        (m.tempId && msg.tempId && m.tempId === msg.tempId)
+                    );
+
+                    if (index !== -1) {
+                        const updated = [...prev];
+                        updated[index] = { ...updated[index], ...msg };
+                        return updated;
+                    }
+                    return [...prev, msg];
+                });
+            });
+
+        } catch (error) {
+            console.error("Error setting up chat:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const scrollToBottom = () => {
+        if (messages.length > 0) {
+            flatListRef.current?.scrollToEnd({ animated: true });
+        }
+    }
+
+    const sendMessage = () => {
+        const text = inputText.trim();
+        if (!text) return;
+
+        // 1. Detect 10 digits in current message (robustly)
+        const currentDigits = text.replace(/\D/g, '');
+
+        // 2. Prevent 10+ digits in a single message (obfuscated or not)
+        if (currentDigits.length >= 10) {
+            Alert.alert(
+                "Security Alert",
+                "Sharing phone numbers or contact details is strictly prohibited to ensure platform security. Please use the app for all communications.",
+                [{ text: "I Understand", style: "cancel" }]
+            );
+            return;
+        }
+
+        // 3. Prevent "chunking" (sending a number across multiple messages)
+        // Check last 5 messages from the same user sent within the last 5 minutes
+        const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+        let previousDigits = "";
+
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            const msgTime = new Date(msg.createdAt).getTime();
+
+            // Stop if message is too old or from another user (consecutive check)
+            if (msg.senderId !== currentUserId || msgTime < fiveMinutesAgo) {
+                break;
+            }
+
+            previousDigits = msg.message.replace(/\D/g, '') + previousDigits;
+
+            // Only look back at most 5 messages to avoid extreme false positives
+            if (i < messages.length - 5) break;
+        }
+
+        const totalDigits = previousDigits + currentDigits;
+
+        if (totalDigits.length >= 10 && currentDigits.length > 0) {
+            Alert.alert(
+                "Security Alert",
+                "Sharing phone numbers in parts is also prohibited. Please keep all business communication within the app to ensure your security.",
+                [{ text: "I Understand", style: "cancel" }]
+            );
+            return;
+        }
+
+        const tempId = Date.now().toString();
+        const newMsg = {
+            tempId,
+            chatId,
+            senderId: currentUserId,
+            receiverId: otherUserId,
+            message: text,
+            createdAt: new Date().toISOString()
+        };
+
+        setMessages((prev) => [...prev, newMsg]);
+        setInputText('');
+
+        socketService.sendMessage(newMsg);
+    };
+
+    const handleLongPress = (id) => {
+        if (!id) return;
+        setIsSelectionMode(true);
+        const next = new Set(selectedMessages);
+        next.add(id);
+        setSelectedMessages(next);
+    };
+
+    const handlePress = (id) => {
+        if (!id) return;
+        const next = new Set(selectedMessages);
+        if (next.has(id)) {
+            next.delete(id);
+            if (next.size === 0) setIsSelectionMode(false);
+        } else {
+            next.add(id);
+        }
+        setSelectedMessages(next);
+    };
+
+    const cancelSelection = () => {
+        setIsSelectionMode(false);
+        setSelectedMessages(new Set());
+    };
+
+    const deleteSelected = () => {
+        if (selectedMessages.size === 0) return;
+
+        Alert.alert(
+            "Delete Messages",
+            `Are you sure you want to delete ${selectedMessages.size} selected messages?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            const idsToDelete = Array.from(selectedMessages).filter(id => !id.startsWith('17')); // Filter out tempIds (which start with timestamp)
+                            const res = await deleteMessages(idsToDelete);
+                            if (res.success) {
+                                setMessages(prev => prev.filter(m => !selectedMessages.has(m._id || m.tempId)));
+                                cancelSelection();
+                            }
+                        } catch (error) {
+                            Alert.alert("Error", "Could not delete messages.");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    return (
+        <View className="flex-1 bg-white">
+            <StatusBar barStyle="light-content" />
+            
+            {/* Top Gradient Header Area */}
+            <LinearGradient
+                colors={['#000000ff', '#1e4a3b']}
+                className="absolute top-0 left-0 right-0 h-40"
+            />
+            
+            <SafeAreaView edges={['top']} className="flex-1">
+                <ChatHeader
+                    chatTitle={chatTitle}
+                    otherUserId={otherUserId}
+                    navigation={navigation}
+                    isSelectionMode={isSelectionMode}
+                    selectedCount={selectedMessages.size}
+                    onCancelSelection={cancelSelection}
+                    onDeleteSelected={deleteSelected}
+                />
+
+                <View 
+                    className="flex-1" 
+                    style={{ paddingBottom: keyboardHeight }}
+                >
+                    <View className="flex-1 bg-white rounded-t-[40px] overflow-hidden">
+                        <View className="py-3 items-center bg-white/50 border-b border-gray-100">
+                            <View className="flex-row items-center px-3 py-1 bg-emerald-50 rounded-full border border-emerald-100/50">
+                                <Lock size={10} color="#059669" />
+                                <Text className="text-[10px] text-emerald-700 font-bold ml-1 uppercase tracking-tighter">Encrypted Communication</Text>
+                            </View>
+                        </View>
+
+                        <View className="flex-1">
+                            {loading ? (
+                                <View className="flex-1 justify-center items-center">
+                                    <ActivityIndicator size="large" color="#123524" />
+                                </View>
+                            ) : (
+                                <FlashList
+                                    ref={flatListRef}
+                                    data={messages}
+                                    keyExtractor={(item) => item._id || item.tempId}
+                                    estimatedItemSize={80}
+                                    contentContainerStyle={{ paddingVertical: 20 }}
+                                    showsVerticalScrollIndicator={false}
+                                    renderItem={({ item }) => (
+                                        <MessageBubble
+                                            message={item}
+                                            isMine={item.senderId === currentUserId}
+                                            onLongPress={handleLongPress}
+                                            onPress={handlePress}
+                                            isSelected={selectedMessages.has(item._id || item.tempId)}
+                                            isSelectionMode={isSelectionMode}
+                                        />
+                                    )}
+                                    onContentSizeChange={scrollToBottom}
+                                />
+                            )}
+                        </View>
+
+                        {!isSelectionMode && (
+                            <View className="bg-white border-t border-gray-100">
+                                <View className="flex-row items-center px-2 pt-3 pb-9 gap-x-2">
+                                    <TouchableOpacity className="w-10 h-10 bg-gray-50 rounded-full items-center justify-center border border-gray-100">
+                                        <Paperclip size={20} color="#6b7280" />
+                                    </TouchableOpacity>
+
+                                    <View className="flex-1 bg-gray-50 rounded-2xl px-4 py-1.5 border border-gray-100">
+                                        <TextInput
+                                            className="text-sm text-gray-800 min-h-[40px] max-h-32"
+                                            placeholder="Type a message..."
+                                            placeholderTextColor="#9ca3af"
+                                            value={inputText}
+                                            onChangeText={setInputText}
+                                            multiline
+                                        />
+                                    </View>
+
+                                    <TouchableOpacity
+                                        onPress={inputText.trim() ? sendMessage : undefined}
+                                        className={`w-12 h-12 rounded-2xl items-center justify-center shadow-lg ${inputText.trim() ? 'bg-[#123524] shadow-emerald-900/30' : 'bg-gray-100'}`}
+                                        activeOpacity={0.8}
+                                    >
+                                        {inputText.trim() ? (
+                                            <Send size={20} color="#fff" />
+                                        ) : (
+                                            <Mic size={20} color="#6b7280" />
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        )}
+                    </View>
+                </View>
+            </SafeAreaView>
+        </View>
+    );
+}
