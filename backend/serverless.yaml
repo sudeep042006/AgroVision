@@ -1,0 +1,12 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: agro-serverless-demo
+spec:
+  template:
+    spec:
+      containers:
+        - image: quay.io/openshift-knative/hello-openshift
+          env:
+            - name: RESPONSE
+              value: "Hello Hackathon Judges! This is a Serverless Event-Driven response!"
