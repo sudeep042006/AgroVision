@@ -14,7 +14,7 @@ RUN npm ci --only=production
 COPY . .
 
 # Expose the port your Express app runs on (assuming 3000, change if different)
-EXPOSE 5000
+EXPOSE 5050
 
 # Command to start your application
 CMD ["npm", "start"]
