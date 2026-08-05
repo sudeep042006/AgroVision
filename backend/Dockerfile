@@ -1,5 +1,5 @@
 # Use the official, lightweight Node.js image
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -13,8 +13,8 @@ RUN npm ci --only=production
 # Copy the rest of your application code
 COPY . .
 
-# Expose the port your Express app runs on (assuming 3000, change if different)
-EXPOSE 5050
+# Expose the correct port that your Express app runs on
+EXPOSE 3000
 
 # Command to start your application
 CMD ["npm", "start"]
