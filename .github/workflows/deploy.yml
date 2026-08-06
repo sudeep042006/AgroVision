@@ -27,7 +27,8 @@ jobs:
           context: ./backend
           push: true
           tags: sudeepkuralkar02/agrovision-backend:latest
-          - name: Authenticate to OpenShift
+
+      - name: Authenticate to OpenShift
         uses: redhat-actions/oc-login@v1
         with:
           openshift_server_url: ${{ secrets.OPENSHIFT_SERVER_URL }}
