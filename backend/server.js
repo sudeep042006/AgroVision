@@ -51,7 +51,7 @@ app.use("/api/v1/proposal", proposalRoutes);
 startPriceSyncJob();
 
 app.get("/",(req,res)=>{
-    res.send("KrishiSetu is Running");
+    res.send("Agrovision is Running");
 })
 
 server.listen(process.env.PORT, () => {

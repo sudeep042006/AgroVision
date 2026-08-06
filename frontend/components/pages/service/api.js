@@ -116,6 +116,9 @@ export const authService = {
         role: credentials.role === 'Farmer' ? 'farmer' : 'offtaker',
       };
 
+      console.log('ATTEMPTING LOGIN TO:', apiClient.defaults.baseURL + '/auth/login');
+      console.log('PAYLOAD:', payload);
+
       const response = await apiClient.post('auth/login', payload);
       console.log('LOGIN RESPONSE:', JSON.stringify(response.data));
 
