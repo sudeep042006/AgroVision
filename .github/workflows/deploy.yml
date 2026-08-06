@@ -43,4 +43,4 @@ jobs:
 
       - name: Trigger OpenShift Rollout
         run: |
-          oc rollout restart deployment/backend
+          oc import-image backend:v1 --from=sudeepkuralkar02/agrovision-backend:latest --confirm
