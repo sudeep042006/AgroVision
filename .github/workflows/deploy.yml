@@ -28,6 +28,11 @@ jobs:
           push: true
           tags: sudeepkuralkar02/agrovision-backend:latest
 
+      - name: Install OpenShift CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: "4"
+
       - name: Authenticate to OpenShift
         uses: redhat-actions/oc-login@v1
         with:
@@ -37,4 +42,4 @@ jobs:
 
       - name: Trigger OpenShift Rollout
         run: |
-          ./oc rollout restart deployment/backend
+          oc rollout restart deployment/backend
